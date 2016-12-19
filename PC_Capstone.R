@@ -83,7 +83,7 @@ RateFinaljoinfilter <- RateFinaljoin %>% filter(MaxOOPYearly != "NA")
 
 #Some more visual exploration
 ggplot(RateFinaljoinfilter, aes(x = MinOOPYearly, y = MaxOOPYearly, col = MetalLevel_2016)) + geom_point()
-ggplot(RateFinaljoinfilter, aes(x = MinOOPYearly, y = MaxOOPYearly, col = MetalLevel_2016)) + geom_point() + facet_wrap(~Age)
+ggplot(RateFinaljoinfilter, aes(x = MinOOPYearly, y = MaxOOPYearly, col = MetalLevel_2016)) + geom_smooth(method = "lm") + facet_wrap(~Age) + theme_bw()
 #creating a map
 library(mapdata)
 library(maps)
@@ -91,3 +91,43 @@ RateFinaljoinfilter$region <- state.name[match(RateFinaljoinfilter$Rate1.StateCo
 RateFinaljoinfilter$region <- tolower(RateFinaljoinfilter$region)
 TotalMap <- merge(states, RateFinaljoinfilter, by = "region")
 ggplot() + geom_polygon(data = TotalMap, aes(x=long, y=lat, group=group, fill=TotalMap$MaxOOPYearly), colour = "white") + scale_fill_continuous(low="thistle2",high="darkred", guide="colorbar") + theme_bw()
+#plot showing linear regression models for each metal level and age group
+ggplot(RateFinaljoinfilter, aes(x = MinOOPYearly, y = MaxOOPYearly, col = MetalLevel_2016)) + stat_summary(fun.data = mean_cl_normal) + geom_smooth(method = 'lm') + facet_wrap(~Age) + theme_bw()
+
+# LoadHospital inpatient data set and manipulate to get Profiles
+Medicare_Provider_Charge_Inpatient_DRGALL_FY2014 <- read_csv("C:/Users/greed/OneDrive/Documents/Springboard/Capstone/health-insurance-marketplace-release-2016-01-20-15-52-37/health-insurance-marketplace/Medicare_Provider_Charge_Inpatient_DRGALL_FY2014.csv")
+Inpatient1 <- Medicare_Provider_Charge_Inpatient_DRGALL_FY2014 %>% group_by(`Provider State`, `DRG Definition`) %>% mutate(AVG.Payments = mean(`AVG Total Payments 2016`)) %>% arrange(`Provider State`, `DRG Definition`)
+Inpatient2 <- Inpatient1 %>% group_by(`Provider State`, `DRG Definition`, AVG.Payments) %>% summarise()
+colnames(Inpatient2) <- c("Provider.State", "DRG.Definitions", "AVG.Payments")
+
+# Selected cost buckets related to cardiology outcomes, with data for over 45 states, performed exploration with excel using pivot tables.
+Cardio.DRG <- data.frame(c(216, 219, 233, 217, 235, 237, 227, 220, 239, 236, 242, 252, 238, 246, 248, 264, 253, 243, 208, 286, 251, 249, 283, 254, 280, 291, 287, 281, 292, 293))
+colnames(Cardio.DRG) <- "Cardio.DRG"
+Cardio.DRG$Cardio.DRG <- as.character(Cardio.DRG$Cardio.DRG)
+Inpatient2 <- separate(Inpatient2, DRG.Definitions, c("x","y"), sep = " - ")
+colnames(Inpatient2) <- c("Provider.State", "Cardio.DRG", "Definitions", "AVG.Payments")
+Inpatient3 <- semi_join(Inpatient2, Cardio.DRG, by = "Cardio.DRG")
+Inpatient3$Cardio.DRG <- as.factor(Inpatient3$Cardio.DRG)
+ggplot(Inpatient3, aes(x=Cardio.DRG, y=AVG.Payments, col=Provider.State)) + geom_jitter()
+ggplot(Inpatient3, aes(x=Cardio.DRG, y=AVG.Payments)) + geom_jitter() + facet_wrap(~Provider.State)
+#Did some data manipulation in excel to get Severity factors in Inpatient3
+Inpatient3 <- read_csv("C:/Users/greed/OneDrive/Documents/Springboard/Capstone/Inpatient3.csv")
+Inpatient3$Cardio.DRG <- as.factor(Inpatient3$Cardio.DRG)
+ggplot(Inpatient3, aes(x=Cardio.DRG, y=AVG.Payments, col= Severity)) + geom_jitter() + facet_wrap(~Provider.State)
+
+# test the model hypev from Logistic regression exercise
+anova(hyp.out, test="Chisq")
+#Generate test cases to get probabilities for model output
+testcases <- read_csv("C:/Users/greed/OneDrive/Documents/Springboard/Capstone/testcases.csv")
+predset <- cbind(testcases, predict(hyp.out, type = "response",se.fit = TRUE, interval="confidence",newdata = testcases))
+
+# use probability of hypertension leading to an in-patient procedure to calculate out of pocket expenses for the predset
+Payments <- Inpatient3 %>% group_by(Provider.State, Severity) %>% mutate(Payment = mean(AVG.Payments))
+Payments <- Payments %>% group_by(Provider.State, Severity, Payment) %>% summarise
+predsetexpand <- expandRows(predset, count = 152, count.is.col = FALSE)
+Paymentsexpand <- expandRows(Payments, count = 80, count.is.col = FALSE)
+Fullpredset <- bind_cols(predsetexpand, Paymentsexpand)
+Fullpredset <- Fullpredset %>% mutate(Risk.Payment = Payment*fit)
+ggplot(Fullpredset, aes(x = age_p, y = Risk.Payment, col = sex)) + geom_jitter()
+ggplot(Fullpredset, aes(x = age_p, y = Risk.Payment, col = Severity)) + geom_jitter() + facet_wrap(~Provider.State)
+
